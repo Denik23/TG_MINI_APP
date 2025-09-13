@@ -23,21 +23,33 @@ const getUserId = () =>
 const isAdmin = () => getUserId() === ADMIN_ID;
 
 /* ---------- API ---------- */
-async function loadForms() {
+async function loadForms(retries = 3) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000); // ждём 5 сек
+
   try {
-    const res = await fetch(`${API_URL}?action=list`);
+    const res = await fetch(`${API_URL}?action=list`, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
     const json = await res.json();
     if (!json.ok) throw new Error(json.error || 'load error');
     forms = Array.isArray(json.data) ? json.data : [];
   } catch (e) {
+    clearTimeout(timeoutId);
+
+    if (retries > 0) {
+      console.warn(`Повторная попытка... осталось ${retries}`);
+      return loadForms(retries - 1); // рекурсивный retry
+    }
+
     forms = [];
     tg.showAlert?.('Ошибка загрузки форм: ' + e.message);
   } finally {
     render();
-    // Скрыть глобальный лоадер после первой попытки загрузки/рендера
     appLoader?.setAttribute('aria-hidden', 'true');
   }
 }
+
 
 
 // Мутации через GET (избегаем CORS/preflight в WebView)
@@ -316,3 +328,4 @@ modal.addEventListener('click', (e) => {
     }
   }
 });
+
