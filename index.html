@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Зубр Энерджи — Формы</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="appLoader" class="loader app-loader"></div>
+  <!-- Шапка -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-text">
+        <div class="brand-name">Зубр Энерджи</div>
+        <div class="brand-sub">Формы</div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Поиск + "Добавить форму" (видна только админу) -->
+  <section class="toolbar">
+    <input id="searchInput" class="search" type="search" placeholder="Поиск форм…" enterkeyhint="search" />
+    <button id="addBtn" class="btn btn-primary" hidden>Добавить форму</button>
+  </section>
+
+  <!-- Список форм -->
+  <main id="list" class="cards" aria-live="polite"></main>
+
+  <!-- Лист с формой -->
+  <div id="sheet" class="sheet hidden" role="dialog" aria-modal="true">
+    <header class="sheet-header">
+      <button id="backBtn" class="btn back-btn" aria-label="Назад">← Назад</button>
+      <div id="sheetTitle" class="sheet-title">Форма</div>
+      <div class="spacer"></div>
+    </header>
+    <div class="frame-wrap">
+      <div id="loader" class="loader" aria-hidden="true"></div>
+      <iframe id="formFrame" class="sheet-frame" src="about:blank" allow="clipboard-write;"></iframe>
+    </div>
+  </div>
+
+  <!-- Модалка: добавить/редактировать форму -->
+  <div id="formModal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <div id="modalTitle" class="modal-title">Добавить форму</div>
+        <button id="modalClose" class="icon-btn" aria-label="Закрыть">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="fldId" />
+        <div class="grid">
+          <label class="field">
+            <span>Название *</span>
+            <input id="fldTitle" type="text" placeholder="Напр. Обратная связь" inputmode="text" />
+          </label>
+          <label class="field">
+            <span>Описание</span>
+            <textarea id="fldDesc" rows="3" placeholder="Коротко о форме"></textarea>
+          </label>
+          <label class="field">
+            <span>Предзаполненная ссылка *</span>
+            <input id="fldBaseUrl" type="url" placeholder="https://docs.google.com/forms/...&entry.XXXXXX=" inputmode="url" />
+            <small class="help">Ссылка обязана заканчиваться на <b>=</b> и содержать <code>entry.XXXX</code> (поле Telegram ID).</small>
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button id="modalSave" class="btn btn-primary">Сохранить</button>
+          <button id="modalCancel" class="btn btn-ghost">Отмена</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
