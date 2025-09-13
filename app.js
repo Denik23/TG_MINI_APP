@@ -1,58 +1,84 @@
 /* ===================== Mini App: Zubr Forms (Sheets CRUD + iframe) ===================== */
-const tg = window.Telegram.WebApp;
-window.addEventListener('DOMContentLoaded', () => tg.ready());
 
-/* ---------- Тема ---------- */
-(function setTheme() {
-  const scheme = tg.colorScheme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-  document.documentElement.setAttribute('data-theme', scheme);
-})();
-tg.onEvent('themeChanged', () => {
-  document.documentElement.setAttribute('data-theme', tg.colorScheme);
-});
+/* --- Безопасный доступ к Telegram.WebApp (стаб вне Телеграма) --- */
+const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : {
+  colorScheme: (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light',
+  onEvent(){},
+  showAlert: (msg) => alert(msg),
+  showPopup: ({title = 'Info', message = ''} = {}) => alert(`${title}\n\n${message}`),
+  showToast: ({text} = {}) => console.log(text || 'toast'),
+  HapticFeedback: { impactOccurred(){} },
+  initDataUnsafe: { user: { id: new URLSearchParams(location.search).get('tgid') || '' } },
+  openLink: (url) => window.open(url, '_blank'),
+  ready(){},
+};
 
-/* ---------- Константы ---------- */
-const ADMIN_ID = '226674400';                                
+/* ---------- Константы (оставь свои) ---------- */
+const ADMIN_ID = '226674400';
 const API_URL  = 'https://script.google.com/macros/s/AKfycbxYLWsMRGFerrJZQy-oI_QbfFDwgcyyxHfNFaCVQH2CQ0g6v_nPOCuUe-IuFsYg9ZGQ/exec';
-const appLoader  = document.getElementById('appLoader');
 
 /* ---------- Состояние ---------- */
 let forms = [];
 let isLoading = false;
 
-/* ---------- Helpers ---------- */
+/* ---------- Утилиты ---------- */
 const getUserId = () =>
   String(tg.initDataUnsafe?.user?.id || new URLSearchParams(location.search).get('tgid') || '');
 const isAdmin = () => getUserId() === ADMIN_ID;
 
-/* ---------- API ---------- */
-async function loadForms(retries = 3) {
+const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+
+/* ---------- Тема без перезагрузки ---------- */
+function applyTheme(scheme) {
+  document.documentElement.setAttribute('data-theme', scheme || tg.colorScheme || (
+    (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'
+  ));
+}
+
+/* ---------- API (ретраи без setTimeout-капкана) ---------- */
+async function fetchWithTimeout(url, ms = 10000) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), ms);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    return res;
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function loadForms(maxRetries = 3) {
   if (isLoading) return;
   isLoading = true;
 
-  appLoader?.removeAttribute('aria-hidden');
-  appLoader.innerHTML = '<div style="color:white;font-size:16px;">⏳ Загружаем данные...</div>';
-
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000); // увеличено время ожидания
-
   try {
-    const res = await fetch(`${API_URL}?action=list`, { signal: controller.signal });
-    clearTimeout(timeoutId);
+    // Показ лоадера
+    appLoader?.removeAttribute('aria-hidden');
+    appLoader && (appLoader.innerHTML = '<div style="color:white;font-size:16px;">⏳ Загружаем данные...</div>');
 
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || 'load error');
-    forms = Array.isArray(json.data) ? json.data : [];
-
-  } catch (e) {
-    clearTimeout(timeoutId);
-    if (retries > 0) {
-      console.warn(`Повторная попытка... осталось ${retries}`);
-      return setTimeout(() => loadForms(retries - 1), 1000);
+    let attempt = 0, lastErr = null;
+    while (attempt < maxRetries) {
+      try {
+        const res  = await fetchWithTimeout(`${API_URL}?action=list`, 10000);
+        const text = await res.text();
+        let json; try { json = JSON.parse(text); } catch { throw new Error(`Bad JSON: ${text}`); }
+        if (!json.ok) throw new Error(json.error || 'load error');
+        forms = Array.isArray(json.data) ? json.data : [];
+        lastErr = null;
+        break; // успех
+      } catch (e) {
+        lastErr = e;
+        attempt++;
+        if (attempt < maxRetries) {
+          console.warn(`Повторная попытка загрузки (${attempt}/${maxRetries - 1})…`, e);
+          await sleep(1000);
+        }
+      }
     }
-    forms = [];
-    tg.showAlert?.('Ошибка загрузки форм: ' + e.message);
-
+    if (lastErr) {
+      forms = [];
+      tg.showAlert?.('Ошибка загрузки форм: ' + lastErr.message);
+    }
   } finally {
     isLoading = false;
     render();
@@ -70,7 +96,7 @@ async function saveFormRemote(form) {
     desc: form.desc || '',
     baseUrl: form.baseUrl || ''
   });
-  const res = await fetch(`${API_URL}?${qs.toString()}`);
+  const res  = await fetch(`${API_URL}?${qs.toString()}`);
   const text = await res.text();
   let json; try { json = JSON.parse(text); } catch { throw new Error(`Bad JSON: ${text}`); }
   if (!json.ok) throw new Error(json.error || 'save error');
@@ -79,45 +105,20 @@ async function saveFormRemote(form) {
 async function deleteFormRemote(id) {
   const userId = getUserId();
   const qs = new URLSearchParams({ action: 'delete', userId, id });
-  const res = await fetch(`${API_URL}?${qs.toString()}`);
+  const res  = await fetch(`${API_URL}?${qs.toString()}`);
   const text = await res.text();
   let json; try { json = JSON.parse(text); } catch { throw new Error(`Bad JSON: ${text}`); }
   if (!json.ok) throw new Error(json.error || 'delete error');
 }
 
-/* ---------- UI refs ---------- */
-const list        = document.getElementById('list');
-const search      = document.getElementById('searchInput');
-const addBtn      = document.getElementById('addBtn');
-
-const sheet       = document.getElementById('sheet');
-const frame       = document.getElementById('formFrame');
-const loader      = document.getElementById('loader');
-const sheetTitle  = document.getElementById('sheetTitle');
-document.getElementById('backBtn').addEventListener('click', closeSheet);
-
-const modal       = document.getElementById('formModal');
-const modalTitle  = document.getElementById('modalTitle');
-const modalClose  = document.getElementById('modalClose');
-const modalSave   = document.getElementById('modalSave');
-const modalCancel = document.getElementById('modalCancel');
-const fldId       = document.getElementById('fldId');
-const fldTitle    = document.getElementById('fldTitle');
-const fldDesc     = document.getElementById('fldDesc');
-const fldBaseUrl  = document.getElementById('fldBaseUrl');
-
-/* ---------- Инициализация ---------- */
-if (isAdmin()) addBtn.hidden = false;
-loadForms();
-search.addEventListener('input', render);
-addBtn.addEventListener('click', () => openModalForCreate());
-modalClose.addEventListener('click', closeModal);
-modalCancel.addEventListener('click', closeModal);
-modalSave.addEventListener('click', onModalSave);
+/* ---------- Глобальные ссылки на элементы (заполняются в init) ---------- */
+let appLoader, list, search, addBtn, sheet, frame, loader, sheetTitle, backBtn;
+let modal, modalTitle, modalClose, modalSave, modalCancel, fldId, fldTitle, fldDesc, fldBaseUrl;
 
 /* ---------- Рендер списка ---------- */
 function render() {
-  const q = (search.value || '').trim().toLowerCase();
+  if (!list) return;
+  const q = (search?.value || '').trim().toLowerCase();
   list.innerHTML = '';
   const data = forms.filter(f =>
     (f.title || '').toLowerCase().includes(q) ||
@@ -147,12 +148,14 @@ function render() {
       </div>`;
 
     const [openBtn, moreBtn, editBtn, delBtn] = card.querySelectorAll('button');
+
     openBtn.onclick = () => openForm(f);
     moreBtn.onclick = () => tg.showPopup?.({
       title: f.title,
       message: (f.desc || 'Описание отсутствует') + `\n\nID: ${f.id || '—'}`,
       buttons: [{ id:'ok', type:'close', text:'OK' }]
     });
+
     if (isAdmin()) {
       editBtn.onclick = () => openModalForEdit(f);
       delBtn.onclick  = () => deleteForm(f);
@@ -163,29 +166,31 @@ function render() {
 
 /* ---------- Модалка ---------- */
 function openModalForCreate() {
-  modalTitle.textContent = 'Добавить форму';
-  fldId.value = '';
-  fldTitle.value = '';
-  fldDesc.value = '';
-  fldBaseUrl.value = '';
+  if (!modal) return;
+  modalTitle && (modalTitle.textContent = 'Добавить форму');
+  fldId && (fldId.value = '');
+  fldTitle && (fldTitle.value = '');
+  fldDesc && (fldDesc.value = '');
+  fldBaseUrl && (fldBaseUrl.value = '');
   modal.classList.remove('hidden');
 }
 function openModalForEdit(f) {
-  modalTitle.textContent = 'Редактировать форму';
-  fldId.value = f.id || '';
-  fldTitle.value = f.title || '';
-  fldDesc.value = f.desc || '';
-  fldBaseUrl.value = f.baseUrl || '';
+  if (!modal) return;
+  modalTitle && (modalTitle.textContent = 'Редактировать форму');
+  fldId && (fldId.value = f.id || '');
+  fldTitle && (fldTitle.value = f.title || '');
+  fldDesc && (fldDesc.value = f.desc || '');
+  fldBaseUrl && (fldBaseUrl.value = f.baseUrl || '');
   modal.classList.remove('hidden');
 }
-function closeModal() { modal.classList.add('hidden'); }
+function closeModal() { modal?.classList.add('hidden'); }
 
 async function onModalSave() {
   const form = {
-    id: (fldId.value || '').trim(),
-    title: (fldTitle.value || '').trim(),
-    desc: (fldDesc.value || '').trim(),
-    baseUrl: (fldBaseUrl.value || '').trim()
+    id: (fldId?.value || '').trim(),
+    title: (fldTitle?.value || '').trim(),
+    desc: (fldDesc?.value || '').trim(),
+    baseUrl: (fldBaseUrl?.value || '').trim()
   };
   if (!form.title) return tg.showAlert?.('Введите название формы');
   if (!form.baseUrl.includes('entry.') || !form.baseUrl.endsWith('='))
@@ -223,76 +228,67 @@ function deleteForm(f) {
   });
 }
 
-/* ---------- Открыть форму ---------- */
+/* ---------- Открыть форму (с анти-мерцанием) ---------- */
 function openForm(form) {
   const uid = getUserId();
-  if (!uid) {
-    tg.showAlert?.('Не удалось получить Telegram ID.');
-    return;
-  }
-
-  if (!form.baseUrl) {
-    tg.showAlert?.('Ссылка не указана.');
-    return;
-  }
+  if (!uid) return tg.showAlert?.('Не удалось получить Telegram ID. Откройте мини-апп из Telegram или добавьте ?tgid=ID для теста.');
+  if (!form.baseUrl) return tg.showAlert?.('Ссылка не указана.');
 
   let url = form.baseUrl;
 
+  // Google Forms
   if (url.includes("docs.google.com/forms")) {
-    if (!url.endsWith('=')) {
-      tg.showAlert?.('baseUrl для формы должен заканчиваться "=".');
-      return;
-    }
+    if (!url.endsWith('=')) return tg.showAlert?.('baseUrl для формы должен заканчиваться "=".');
     url = `${url}${encodeURIComponent(uid)}&embedded=true`;
   }
+  // Google Slides
   else if (url.includes("docs.google.com/presentation")) {
     if (url.includes("/pub?")) url = url.replace("/pub?", "/embed?");
     if (!url.includes("/embed?")) url = url.replace(/\/d\/e\/[^/]+/, "$&/embed");
   }
 
-  sheetTitle.textContent = form.title || 'Документ';
+  sheetTitle && (sheetTitle.textContent = form.title || 'Документ');
   showSheet(url);
 }
 
 function showSheet(url) {
   tg.HapticFeedback?.impactOccurred('light');
 
-  sheet.classList.remove('hidden');
-  loader.removeAttribute('aria-hidden');
-  frame.src = 'about:blank';
-  requestAnimationFrame(() => sheet.classList.add('open'));
+  sheet?.classList.remove('hidden');
+  loader?.removeAttribute('aria-hidden');
+  if (frame) frame.src = 'about:blank';
+  requestAnimationFrame(() => sheet?.classList.add('open'));
 
   const fallback = setTimeout(() => {
     try { tg.openLink?.(url); } catch { window.open(url, '_blank'); }
   }, 4500);
 
-  frame.onload = () => {
-    clearTimeout(fallback);
-    loader.setAttribute('aria-hidden', 'true');
-  };
-
-  // задержка для плавности
-  setTimeout(() => {
-    frame.src = url;
-  }, 150);
+  if (frame) {
+    frame.onload = () => {
+      clearTimeout(fallback);
+      loader?.setAttribute('aria-hidden', 'true');
+    };
+    // небольшая задержка — помогает iOS WebView не «мигать»
+    setTimeout(() => { frame.src = url; }, 150);
+  }
 }
 
 function closeSheet() {
-  sheet.classList.remove('open');
+  sheet?.classList.remove('open');
   setTimeout(() => {
-    frame.src = 'about:blank';
-    loader.setAttribute('aria-hidden', 'true');
-    sheet.classList.add('hidden');
+    if (frame) frame.src = 'about:blank';
+    loader?.setAttribute('aria-hidden', 'true');
+    sheet?.classList.add('hidden');
   }, 250);
 }
 
-/* ---------- Скрывать клавиатуру ---------- */
+/* ---------- Скрывать клавиатуру вне полей ---------- */
 const blurIfOutsideField = (e) => {
-  const isField = e.target.closest('input, textarea, select, [contenteditable="true"]');
+  const isField = e.target.closest?.('input, textarea, select, [contenteditable="true"]');
   if (isField) return;
 
   const el = document.activeElement;
-  if (el && el.matches('input, textarea, select, [contenteditable="true"]')) {
+  if (el && el.matches?.('input, textarea, select, [contenteditable="true"]')) {
     el.blur();
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     if (isIOS) {
@@ -306,13 +302,61 @@ const blurIfOutsideField = (e) => {
     }
   }
 };
-document.addEventListener('touchstart', blurIfOutsideField, { passive:true, capture:true });
-document.addEventListener('mousedown',  blurIfOutsideField, true);
 
-modal.addEventListener('click', (e) => {
-  if (e.target.id === 'formModal') {
-    if (document.activeElement && 'blur' in document.activeElement) {
-      document.activeElement.blur();
+/* ---------- Инициализация (строго после DOM) ---------- */
+function init() {
+  // Тема
+  applyTheme();
+  tg.onEvent('themeChanged', () => applyTheme(tg.colorScheme));
+
+  // DOM-refs (после DOMContentLoaded они существуют)
+  appLoader   = document.getElementById('appLoader');
+  list        = document.getElementById('list');
+  search      = document.getElementById('searchInput');
+  addBtn      = document.getElementById('addBtn');
+
+  sheet       = document.getElementById('sheet');
+  frame       = document.getElementById('formFrame');
+  loader      = document.getElementById('loader');
+  sheetTitle  = document.getElementById('sheetTitle');
+  backBtn     = document.getElementById('backBtn');
+
+  modal       = document.getElementById('formModal');
+  modalTitle  = document.getElementById('modalTitle');
+  modalClose  = document.getElementById('modalClose');
+  modalSave   = document.getElementById('modalSave');
+  modalCancel = document.getElementById('modalCancel');
+  fldId       = document.getElementById('fldId');
+  fldTitle    = document.getElementById('fldTitle');
+  fldDesc     = document.getElementById('fldDesc');
+  fldBaseUrl  = document.getElementById('fldBaseUrl');
+
+  // Вешаем обработчики безопасно
+  backBtn?.addEventListener('click', closeSheet);
+  search?.addEventListener('input', render);
+  addBtn && (addBtn.hidden = !isAdmin());
+  addBtn?.addEventListener('click', openModalForCreate);
+  modalClose?.addEventListener('click', closeModal);
+  modalCancel?.addEventListener('click', closeModal);
+  modalSave?.addEventListener('click', onModalSave);
+
+  document.addEventListener('touchstart', blurIfOutsideField, { passive:true, capture:true });
+  document.addEventListener('mousedown',  blurIfOutsideField, true);
+
+  // Клик по фону модалки снимает фокус
+  modal?.addEventListener('click', (e) => {
+    if (e.target?.id === 'formModal') {
+      if (document.activeElement && 'blur' in document.activeElement) {
+        document.activeElement.blur();
+      }
     }
-  }
-});
+  });
+
+  // Telegram ready после DOM — меньше глюков на iOS
+  tg.ready();
+
+  // Стартовая загрузка
+  loadForms();
+}
+
+window.addEventListener('DOMContentLoaded', init);
