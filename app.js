@@ -24,6 +24,10 @@ const isAdmin = () => getUserId() === ADMIN_ID;
 
 /* ---------- API ---------- */
 async function loadForms(retries = 3) {
+  // показываем лоадер с сообщением
+  appLoader?.removeAttribute('aria-hidden');
+  appLoader.innerHTML = '<div style="color:white;font-size:16px;">⏳ Пробуем подключиться...</div>';
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 5000); // ждём 5 сек
 
@@ -34,21 +38,26 @@ async function loadForms(retries = 3) {
     const json = await res.json();
     if (!json.ok) throw new Error(json.error || 'load error');
     forms = Array.isArray(json.data) ? json.data : [];
+
   } catch (e) {
     clearTimeout(timeoutId);
 
     if (retries > 0) {
       console.warn(`Повторная попытка... осталось ${retries}`);
-      return loadForms(retries - 1); // рекурсивный retry
+      // ждём 1 секунду перед новой попыткой
+      return setTimeout(() => loadForms(retries - 1), 1000);
     }
 
+    // ❗ Ошибка только один раз, если всё провалилось
     forms = [];
     tg.showAlert?.('Ошибка загрузки форм: ' + e.message);
+
   } finally {
     render();
-    appLoader?.setAttribute('aria-hidden', 'true');
+    appLoader?.setAttribute('aria-hidden', 'true'); // скрываем лоадер
   }
 }
+
 
 
 
@@ -328,4 +337,5 @@ modal.addEventListener('click', (e) => {
     }
   }
 });
+
 
