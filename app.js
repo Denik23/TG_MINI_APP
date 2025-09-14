@@ -1,16 +1,16 @@
-/* ===================== Mini App: Zubr Forms (read-only + iframe, robust UID) ===================== */
+/* ===================== Mini App: Zubr Forms (read-only + iframe) ===================== */
 
 /* --- Безопасный доступ к Telegram.WebApp (стаб вне Телеграма) --- */
 const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : {
   colorScheme: (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light',
-  onEvent() {},
+  onEvent(){},
   showAlert: (msg) => alert(msg),
-  showPopup: ({ title = 'Info', message = '' } = {}) => alert(`${title}\n\n${message}`),
-  showToast: ({ text } = {}) => console.log(text || 'toast'),
-  HapticFeedback: { impactOccurred() {} },
+  showPopup: ({title = 'Info', message = ''} = {}) => alert(`${title}\n\n${message}`),
+  showToast: ({text} = {}) => console.log(text || 'toast'),
+  HapticFeedback: { impactOccurred(){} },
   initDataUnsafe: { user: { id: new URLSearchParams(location.search).get('tgid') || '' } },
   openLink: (url) => window.open(url, '_blank'),
-  ready() {},
+  ready(){},
 };
 
 /* ---------- Константы ---------- */
@@ -21,50 +21,19 @@ let forms = [];
 let isLoading = false;
 
 /* ---------- Утилиты ---------- */
-function applyTheme(scheme) {
-  document.documentElement.setAttribute(
-    'data-theme',
-    scheme || tg.colorScheme || ((window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light')
-  );
-}
+const getUserId = () =>
+  String(tg.initDataUnsafe?.user?.id || new URLSearchParams(location.search).get('tgid') || '');
 
 const sleep = (ms) => new Promise(res => setTimeout(res, ms));
 
-/* БЕРЁМ UID из Telegram → query → localStorage (fallback генерируем) */
-function getQueryUid() {
-  const p = new URLSearchParams(location.search);
-  return p.get('tgid') || p.get('uid') || p.get('user_id') || p.get('id') || p.get('u') || '';
+/* ---------- Тема без перезагрузки ---------- */
+function applyTheme(scheme) {
+  document.documentElement.setAttribute('data-theme', scheme || tg.colorScheme || (
+    (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'
+  ));
 }
 
-function makeDevUid() {
-  try {
-    const a = (self.crypto || window.crypto)?.getRandomValues?.(new Uint32Array(2));
-    if (a && a.length === 2) {
-      return 'dev_' + a[0].toString(16) + a[1].toString(16);
-    }
-  } catch {}
-  return 'dev_' + Math.floor(Math.random()*1e9).toString(16) + Date.now().toString(16);
-}
-
-function getUserId() {
-  const fromTG = tg?.initDataUnsafe?.user?.id;
-  const fromQuery = getQueryUid();
-  let id = String(fromTG || fromQuery || '');
-  if (!id) {
-    try {
-      id = localStorage.getItem('zubr_dev_uid') || '';
-      if (!id) {
-        id = makeDevUid();
-        localStorage.setItem('zubr_dev_uid', id);
-      }
-    } catch {
-      id = makeDevUid();
-    }
-  }
-  return id;
-}
-
-/* ---------- API (с таймаутом и ретраями) ---------- */
+/* ---------- API (ретраи без setTimeout-капкана) ---------- */
 async function fetchWithTimeout(url, ms = 10000) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), ms);
@@ -81,7 +50,9 @@ async function loadForms(maxRetries = 3) {
   isLoading = true;
 
   try {
+    // Показ лоадера
     appLoader?.removeAttribute('aria-hidden');
+    appLoader && (appLoader.innerHTML = '<div style="color:white;font-size:16px;">⏳ Загружаем данные...</div>');
 
     let attempt = 0, lastErr = null;
     while (attempt < maxRetries) {
@@ -92,11 +63,14 @@ async function loadForms(maxRetries = 3) {
         if (!json.ok) throw new Error(json.error || 'load error');
         forms = Array.isArray(json.data) ? json.data : [];
         lastErr = null;
-        break;
+        break; // успех
       } catch (e) {
         lastErr = e;
         attempt++;
-        if (attempt < maxRetries) await sleep(800);
+        if (attempt < maxRetries) {
+          console.warn(`Повторная попытка загрузки (${attempt}/${maxRetries - 1})…`, e);
+          await sleep(1000);
+        }
       }
     }
     if (lastErr) {
@@ -110,23 +84,21 @@ async function loadForms(maxRetries = 3) {
   }
 }
 
-/* ---------- Глобальные элементы ---------- */
-let appLoader, list, search;
-let sheet, frame, loader, sheetTitle, backBtn;
+/* ---------- Глобальные ссылки на элементы (заполняются в init) ---------- */
+let appLoader, list, search, sheet, frame, loader, sheetTitle, backBtn;
 
-/* ---------- Рендер списка (read-only) ---------- */
+/* ---------- Рендер списка (только просмотр) ---------- */
 function render() {
   if (!list) return;
   const q = (search?.value || '').trim().toLowerCase();
   list.innerHTML = '';
-
   const data = forms.filter(f =>
     (f.title || '').toLowerCase().includes(q) ||
     (f.desc  || '').toLowerCase().includes(q)
   );
 
   if (!data.length) {
-    list.innerHTML = '<div class="card"><div class="card-title">Ничего не найдено</div></div>';
+    list.innerHTML = '<div class="card">Ничего не найдено</div>';
     return;
   }
 
@@ -134,8 +106,7 @@ function render() {
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML = `
-      <div class="card-title">${escapeHTML(f.title || 'Без названия')}</div>
-      ${f.desc ? `<div class="card-desc">${escapeHTML(f.desc)}</div>` : ''}
+      <div class="card-title">${f.title}</div>
       <div class="card-actions">
         <div class="actions-left">
           <button class="btn btn-primary">Открыть</button>
@@ -147,12 +118,12 @@ function render() {
 
     openBtn.onclick = () => openForm(f);
     moreBtn.onclick = () => tg.showPopup?.({
-      title: f.title || 'Информация',
+      title: f.title,
       message: (f.desc || 'Описание отсутствует') + `\n\nID: ${f.id || '—'}`,
       buttons: [{ id:'ok', type:'close', text:'OK' }]
     });
 
-    // Клик по карточке также открывает
+    // Клик по карточке тоже открывает
     card.addEventListener('click', (e) => {
       if (e.target.tagName.toLowerCase() === 'button') return;
       openForm(f);
@@ -162,28 +133,23 @@ function render() {
   });
 }
 
-/* ---------- Открытие формы (в iframe) ---------- */
+/* ---------- Открыть форму (с анти-мерцанием) ---------- */
 function openForm(form) {
-  const uid = getUserId(); // всегда не пустой (TG/URL/dev)
+  const uid = getUserId();
+  if (!uid) return tg.showAlert?.('Не удалось получить Telegram ID. Откройте мини-апп из Telegram или добавьте ?tgid=ID для теста.');
   if (!form.baseUrl) return tg.showAlert?.('Ссылка не указана.');
 
   let url = form.baseUrl;
 
-  // Google Forms: ожидается baseUrl, заканчивающийся "=" (hidden поле)
-  if (url.includes('docs.google.com/forms')) {
-    if (!url.endsWith('=')) {
-      // не блокируем — просто добавим разделитель, чтобы не ломать UX
-      url = url + (url.includes('?') ? '&' : '?');
-    } else {
-      url = `${url}${encodeURIComponent(uid)}`;
-    }
-    // встраивание
-    url = url + (url.includes('?') ? '&' : '?') + 'embedded=true';
+  // Google Forms
+  if (url.includes("docs.google.com/forms")) {
+    if (!url.endsWith('=')) return tg.showAlert?.('baseUrl для формы должен заканчиваться "=".');
+    url = `${url}${encodeURIComponent(uid)}&embedded=true`;
   }
-  // Google Slides: принудительное embed
-  else if (url.includes('docs.google.com/presentation')) {
-    if (url.includes('/pub?')) url = url.replace('/pub?', '/embed?');
-    if (!url.includes('/embed?')) url = url.replace(/\/d\/e\/[^/]+/, "$&/embed");
+  // Google Slides
+  else if (url.includes("docs.google.com/presentation")) {
+    if (url.includes("/pub?")) url = url.replace("/pub?", "/embed?");
+    if (!url.includes("/embed?")) url = url.replace(/\/d\/e\/[^/]+/, "$&/embed");
   }
 
   sheetTitle && (sheetTitle.textContent = form.title || 'Документ');
@@ -207,6 +173,7 @@ function showSheet(url) {
       clearTimeout(fallback);
       loader?.setAttribute('aria-hidden', 'true');
     };
+    // небольшая задержка — помогает iOS WebView не «мигать»
     setTimeout(() => { frame.src = url; }, 150);
   }
 }
@@ -220,7 +187,7 @@ function closeSheet() {
   }, 250);
 }
 
-/* ---------- UX: скрывать клавиатуру вне полей ---------- */
+/* ---------- Скрывать клавиатуру вне полей ---------- */
 const blurIfOutsideField = (e) => {
   const isField = e.target.closest?.('input, textarea, select, [contenteditable="true"]');
   if (isField) return;
@@ -241,21 +208,24 @@ const blurIfOutsideField = (e) => {
   }
 };
 
-/* ---------- Инициализация ---------- */
+/* ---------- Инициализация (строго после DOM) ---------- */
 function init() {
+  // Тема
   applyTheme();
   tg.onEvent('themeChanged', () => applyTheme(tg.colorScheme));
 
-  appLoader  = document.getElementById('appLoader');
-  list       = document.getElementById('list');
-  search     = document.getElementById('searchInput');
+  // DOM-refs
+  appLoader   = document.getElementById('appLoader');
+  list        = document.getElementById('list');
+  search      = document.getElementById('searchInput');
 
-  sheet      = document.getElementById('sheet');
-  frame      = document.getElementById('formFrame');
-  loader     = document.getElementById('loader');
-  sheetTitle = document.getElementById('sheetTitle');
-  backBtn    = document.getElementById('backBtn');
+  sheet       = document.getElementById('sheet');
+  frame       = document.getElementById('formFrame');
+  loader      = document.getElementById('loader');
+  sheetTitle  = document.getElementById('sheetTitle');
+  backBtn     = document.getElementById('backBtn');
 
+  // Обработчики
   backBtn?.addEventListener('click', closeSheet);
   search?.addEventListener('input', render);
 
@@ -267,13 +237,3 @@ function init() {
 }
 
 window.addEventListener('DOMContentLoaded', init);
-
-/* ---------- Helpers ---------- */
-function escapeHTML(s) {
-  return String(s)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
-}
