@@ -139,11 +139,14 @@ function render() {
 }
 
 /* ---------- Загрузка и рендер статистики ---------- */
-async function loadStats(maxRetries = 2) {
+async function loadStats({ force = false } = {}) {
   let attempt = 0, lastErr = null;
-  while (attempt < maxRetries) {
+  let url = `${STATS_URL}?action=stats`;
+  if (force) url += `&clearCache=1&_=${Date.now()}`;
+
+  while (attempt < 2) {
     try {
-      const res  = await fetchWithTimeout(`${STATS_URL}?action=stats`, 10000);
+      const res  = await fetchWithTimeout(url, 10000);
       const text = await res.text();
       const json = JSON.parse(text);
       if (!json.ok) throw new Error(json.error || 'stats error');
@@ -165,6 +168,13 @@ function renderStats() {
   statSubmittedEl && (statSubmittedEl.textContent = String(stats.submitted|0));
   statProcessedEl && (statProcessedEl.textContent = String(stats.processed|0));
   statPendingEl   && (statPendingEl.textContent   = String(pending));
+}
+
+/* — Форс-обновление статистики после действий пользователя — */
+function refreshStatsAfterAction() {
+  loadStats({ force: true });              // сразу
+  setTimeout(() => loadStats({ force: true }), 4000);   // спустя 4 сек
+  setTimeout(() => loadStats({ force: true }), 12000);  // и ещё через 12 сек
 }
 
 /* ---------- Открыть форму (с анти-мерцанием) ---------- */
@@ -218,6 +228,7 @@ function closeSheet() {
     if (frame) frame.src = 'about:blank';
     loader?.setAttribute('aria-hidden', 'true');
     sheet?.classList.add('hidden');
+    refreshStatsAfterAction(); // обновим цифры после закрытия формы
   }, 250);
 }
 
@@ -275,6 +286,13 @@ function init() {
   document.addEventListener('touchstart', blurIfOutsideField, { passive: true, capture: true });
   document.addEventListener('mousedown',  blurIfOutsideField, true);
 
+  // Если форма открылась во внешней вкладке (fallback) и пользователь вернулся — обновим статистику
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      loadStats({ force: true });
+    }
+  });
+
   // Рассчитываем высоты для "липких" поиска и статистики
   const headerEl  = document.querySelector('.app-header');
   const toolbarEl = document.querySelector('.toolbar');
@@ -304,7 +322,7 @@ function init() {
 
   // Стартовая загрузка
   loadForms();
-  loadStats?.(); // если STATS_URL корректный и на бэке есть action=stats — подтянет цифры
+  loadStats?.(); // первый прогон (без очистки кэша)
 }
 
 window.addEventListener('DOMContentLoaded', init);
