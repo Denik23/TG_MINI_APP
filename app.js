@@ -210,30 +210,47 @@ const blurIfOutsideField = (e) => {
 
 /* ---------- Инициализация (строго после DOM) ---------- */
 function init() {
-  // Тема
+  // Тема + подписка на смену темы
   applyTheme();
-  tg.onEvent('themeChanged', () => applyTheme(tg.colorScheme));
+  tg.onEvent?.('themeChanged', () => applyTheme(tg.colorScheme));
 
   // DOM-refs
-  appLoader   = document.getElementById('appLoader');
-  list        = document.getElementById('list');
-  search      = document.getElementById('searchInput');
+  appLoader  = document.getElementById('appLoader');
+  list       = document.getElementById('list');
+  search     = document.getElementById('searchInput');
 
-  sheet       = document.getElementById('sheet');
-  frame       = document.getElementById('formFrame');
-  loader      = document.getElementById('loader');
-  sheetTitle  = document.getElementById('sheetTitle');
-  backBtn     = document.getElementById('backBtn');
+  sheet      = document.getElementById('sheet');
+  frame      = document.getElementById('formFrame');
+  loader     = document.getElementById('loader');
+  sheetTitle = document.getElementById('sheetTitle');
+  backBtn    = document.getElementById('backBtn');
 
   // Обработчики
   backBtn?.addEventListener('click', closeSheet);
   search?.addEventListener('input', render);
 
-  document.addEventListener('touchstart', blurIfOutsideField, { passive:true, capture:true });
+  document.addEventListener('touchstart', blurIfOutsideField, { passive: true, capture: true });
   document.addEventListener('mousedown',  blurIfOutsideField, true);
 
-  tg.ready();
+  // Telegram WebApp: готовность UI
+  tg.ready?.();
+
+  // --- Всегда открывать на весь экран ---
+  tg.expand?.();                 // сразу разворачиваем
+  tg.disableVerticalSwipes?.();  // блокируем полулист свайпом (если поддерживается)
+
+  // Если вдруг сжалось — разворачиваем снова
+  tg.onEvent?.('viewportChanged', () => {
+    if (!tg.isExpanded) tg.expand?.();
+  });
+
+  // (опционально) можно подобрать цвет системной шапки
+  tg.setHeaderColor?.('secondary_bg_color'); // или 'bg_color'
+
+  // Стартовая загрузка данных
   loadForms();
 }
 
+
 window.addEventListener('DOMContentLoaded', init);
+
