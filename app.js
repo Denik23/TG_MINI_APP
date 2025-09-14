@@ -1,4 +1,4 @@
-/* ===================== Mini App: Zubr Forms (read-only + iframe) ===================== */
+/* ===================== Mini App: Zubr Forms (Sheets CRUD + iframe) ===================== */
 
 /* --- Безопасный доступ к Telegram.WebApp (стаб вне Телеграма) --- */
 const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : {
@@ -13,8 +13,9 @@ const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp 
   ready(){},
 };
 
-/* ---------- Константы ---------- */
-const API_URL = 'https://script.google.com/macros/s/AKfycbxYLWsMRGFerrJZQy-oI_QbfFDwgcyyxHfNFaCVQH2CQ0g6v_nPOCuUe-IuFsYg9ZGQ/exec';
+/* ---------- Константы (оставь свои) ---------- */
+const ADMIN_ID = '226674400';
+const API_URL  = 'https://script.google.com/macros/s/AKfycbxYLWsMRGFerrJZQy-oI_QbfFDwgcyyxHfNFaCVQH2CQ0g6v_nPOCuUe-IuFsYg9ZGQ/exec';
 
 /* ---------- Состояние ---------- */
 let forms = [];
@@ -23,6 +24,7 @@ let isLoading = false;
 /* ---------- Утилиты ---------- */
 const getUserId = () =>
   String(tg.initDataUnsafe?.user?.id || new URLSearchParams(location.search).get('tgid') || '');
+const isAdmin = () => getUserId() === ADMIN_ID;
 
 const sleep = (ms) => new Promise(res => setTimeout(res, ms));
 
@@ -84,10 +86,36 @@ async function loadForms(maxRetries = 3) {
   }
 }
 
-/* ---------- Глобальные ссылки на элементы (заполняются в init) ---------- */
-let appLoader, list, search, sheet, frame, loader, sheetTitle, backBtn;
+async function saveFormRemote(form) {
+  const userId = getUserId();
+  const qs = new URLSearchParams({
+    action: 'save',
+    userId,
+    id: form.id || '',
+    title: form.title || '',
+    desc: form.desc || '',
+    baseUrl: form.baseUrl || ''
+  });
+  const res  = await fetch(`${API_URL}?${qs.toString()}`);
+  const text = await res.text();
+  let json; try { json = JSON.parse(text); } catch { throw new Error(`Bad JSON: ${text}`); }
+  if (!json.ok) throw new Error(json.error || 'save error');
+}
 
-/* ---------- Рендер списка (только просмотр) ---------- */
+async function deleteFormRemote(id) {
+  const userId = getUserId();
+  const qs = new URLSearchParams({ action: 'delete', userId, id });
+  const res  = await fetch(`${API_URL}?${qs.toString()}`);
+  const text = await res.text();
+  let json; try { json = JSON.parse(text); } catch { throw new Error(`Bad JSON: ${text}`); }
+  if (!json.ok) throw new Error(json.error || 'delete error');
+}
+
+/* ---------- Глобальные ссылки на элементы (заполняются в init) ---------- */
+let appLoader, list, search, addBtn, sheet, frame, loader, sheetTitle, backBtn;
+let modal, modalTitle, modalClose, modalSave, modalCancel, fldId, fldTitle, fldDesc, fldBaseUrl;
+
+/* ---------- Рендер списка ---------- */
 function render() {
   if (!list) return;
   const q = (search?.value || '').trim().toLowerCase();
@@ -112,9 +140,14 @@ function render() {
           <button class="btn btn-primary">Открыть</button>
           <button class="btn btn-ghost">Подробнее</button>
         </div>
+        ${isAdmin() ? `
+        <div class="actions-right">
+          <button class="btn btn-ghost btn-sm" title="Редактировать">✏️</button>
+          <button class="btn btn-danger btn-sm" title="Удалить">🗑️</button>
+        </div>` : ''}
       </div>`;
 
-    const [openBtn, moreBtn] = card.querySelectorAll('button');
+    const [openBtn, moreBtn, editBtn, delBtn] = card.querySelectorAll('button');
 
     openBtn.onclick = () => openForm(f);
     moreBtn.onclick = () => tg.showPopup?.({
@@ -123,13 +156,75 @@ function render() {
       buttons: [{ id:'ok', type:'close', text:'OK' }]
     });
 
-    // Клик по карточке тоже открывает
-    card.addEventListener('click', (e) => {
-      if (e.target.tagName.toLowerCase() === 'button') return;
-      openForm(f);
-    });
-
+    if (isAdmin()) {
+      editBtn.onclick = () => openModalForEdit(f);
+      delBtn.onclick  = () => deleteForm(f);
+    }
     list.appendChild(card);
+  });
+}
+
+/* ---------- Модалка ---------- */
+function openModalForCreate() {
+  if (!modal) return;
+  modalTitle && (modalTitle.textContent = 'Добавить форму');
+  fldId && (fldId.value = '');
+  fldTitle && (fldTitle.value = '');
+  fldDesc && (fldDesc.value = '');
+  fldBaseUrl && (fldBaseUrl.value = '');
+  modal.classList.remove('hidden');
+}
+function openModalForEdit(f) {
+  if (!modal) return;
+  modalTitle && (modalTitle.textContent = 'Редактировать форму');
+  fldId && (fldId.value = f.id || '');
+  fldTitle && (fldTitle.value = f.title || '');
+  fldDesc && (fldDesc.value = f.desc || '');
+  fldBaseUrl && (fldBaseUrl.value = f.baseUrl || '');
+  modal.classList.remove('hidden');
+}
+function closeModal() { modal?.classList.add('hidden'); }
+
+async function onModalSave() {
+  const form = {
+    id: (fldId?.value || '').trim(),
+    title: (fldTitle?.value || '').trim(),
+    desc: (fldDesc?.value || '').trim(),
+    baseUrl: (fldBaseUrl?.value || '').trim()
+  };
+  if (!form.title) return tg.showAlert?.('Введите название формы');
+  if (!form.baseUrl.includes('entry.') || !form.baseUrl.endsWith('='))
+    return tg.showAlert?.('Вставьте предзаполненную ссылку Google Forms с entry.XXXX и на конце "="' );
+
+  try {
+    await saveFormRemote(form);
+    closeModal();
+    await loadForms();
+    tg.showToast?.({ text: 'Сохранено', duration: 1400 });
+  } catch (e) {
+    tg.showAlert?.('Ошибка сохранения: ' + e.message);
+  }
+}
+
+/* ---------- Удаление ---------- */
+function deleteForm(f) {
+  tg.showPopup?.({
+    title: 'Удалить форму?',
+    message: `«${f.title}» будет удалена.`,
+    buttons: [
+      { id:'cancel', type:'cancel', text:'Отмена' },
+      { id:'ok',     type:'destructive', text:'Удалить' }
+    ]
+  }, async (btnId) => {
+    if (btnId === 'ok') {
+      try {
+        await deleteFormRemote(f.id);
+        await loadForms();
+        tg.showToast?.({ text: 'Удалено', duration: 1400 });
+      } catch (e) {
+        tg.showAlert?.('Ошибка удаления: ' + e.message);
+      }
+    }
   });
 }
 
@@ -214,10 +309,11 @@ function init() {
   applyTheme();
   tg.onEvent('themeChanged', () => applyTheme(tg.colorScheme));
 
-  // DOM-refs
+  // DOM-refs (после DOMContentLoaded они существуют)
   appLoader   = document.getElementById('appLoader');
   list        = document.getElementById('list');
   search      = document.getElementById('searchInput');
+  addBtn      = document.getElementById('addBtn');
 
   sheet       = document.getElementById('sheet');
   frame       = document.getElementById('formFrame');
@@ -225,14 +321,41 @@ function init() {
   sheetTitle  = document.getElementById('sheetTitle');
   backBtn     = document.getElementById('backBtn');
 
-  // Обработчики
+  modal       = document.getElementById('formModal');
+  modalTitle  = document.getElementById('modalTitle');
+  modalClose  = document.getElementById('modalClose');
+  modalSave   = document.getElementById('modalSave');
+  modalCancel = document.getElementById('modalCancel');
+  fldId       = document.getElementById('fldId');
+  fldTitle    = document.getElementById('fldTitle');
+  fldDesc     = document.getElementById('fldDesc');
+  fldBaseUrl  = document.getElementById('fldBaseUrl');
+
+  // Вешаем обработчики безопасно
   backBtn?.addEventListener('click', closeSheet);
   search?.addEventListener('input', render);
+  addBtn && (addBtn.hidden = !isAdmin());
+  addBtn?.addEventListener('click', openModalForCreate);
+  modalClose?.addEventListener('click', closeModal);
+  modalCancel?.addEventListener('click', closeModal);
+  modalSave?.addEventListener('click', onModalSave);
 
   document.addEventListener('touchstart', blurIfOutsideField, { passive:true, capture:true });
   document.addEventListener('mousedown',  blurIfOutsideField, true);
 
+  // Клик по фону модалки снимает фокус
+  modal?.addEventListener('click', (e) => {
+    if (e.target?.id === 'formModal') {
+      if (document.activeElement && 'blur' in document.activeElement) {
+        document.activeElement.blur();
+      }
+    }
+  });
+
+  // Telegram ready после DOM — меньше глюков на iOS
   tg.ready();
+
+  // Стартовая загрузка
   loadForms();
 }
 
