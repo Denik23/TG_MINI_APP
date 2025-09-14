@@ -115,18 +115,7 @@ body{
 @keyframes spin{to{transform:rotate(360deg)}}
 
 .spacer{width:36px}
-.app-header{
-  background: transparent !important;
-  border-bottom: none !important;
-  backdrop-filter: none !important;
-}
-body{
-  background:
-    /* верхняя подложка тем же цветом, что и системная шапка */
-    linear-gradient(to bottom, var(--tg-theme-bg-color, var(--bg)) 0 60px, transparent 60px),
-    radial-gradient(1200px 600px at 100% -10%, rgba(20,120,255,.10), transparent 60%),
-    radial-gradient(1200px 600px at -20% 100%, rgba(255,87,34,.10), transparent 60%),
-    var(--bg);
-}
+
+
 
 
