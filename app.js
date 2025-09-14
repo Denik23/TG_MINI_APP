@@ -133,6 +133,35 @@ function render() {
   });
 }
 
+async function loadStats(maxRetries = 2) {
+  // Пытаемся получить stats; при ошибке оставим нули
+  let attempt = 0, lastErr = null;
+  while (attempt < maxRetries) {
+    try {
+      const res  = await fetchWithTimeout(`${API_URL}?action=stats`, 10000);
+      const text = await res.text();
+      const json = JSON.parse(text);
+      if (!json.ok) throw new Error(json.error || 'stats error');
+      const d = json.data || {};
+      stats.submitted = Number(d.submitted || 0);
+      stats.processed = Number(d.processed || 0);
+      lastErr = null;
+      break;
+    } catch (e) {
+      lastErr = e; attempt++; await sleep(600);
+    }
+  }
+  if (lastErr) { stats.submitted = 0; stats.processed = 0; }
+  renderStats();
+}
+
+function renderStats() {
+  const pending = Math.max(0, (stats.submitted|0) - (stats.processed|0));
+  statSubmittedEl && (statSubmittedEl.textContent = String(stats.submitted|0));
+  statProcessedEl && (statProcessedEl.textContent = String(stats.processed|0));
+  statPendingEl   && (statPendingEl.textContent   = String(pending));
+}
+
 /* ---------- Открыть форму (с анти-мерцанием) ---------- */
 function openForm(form) {
   const uid = getUserId();
@@ -210,15 +239,24 @@ const blurIfOutsideField = (e) => {
 
 /* ---------- Инициализация (строго после DOM) ---------- */
 function init() {
-  // Тема + подписка на смену темы
+  // Тема + обновление цвета шапки Telegram под фон
   applyTheme();
-  tg.onEvent?.('themeChanged', () => applyTheme(tg.colorScheme));
+  tg.onEvent?.('themeChanged', () => {
+    applyTheme(tg.colorScheme);
+    tg.setHeaderColor?.('bg_color');
+  });
 
   // DOM-refs
   appLoader  = document.getElementById('appLoader');
   list       = document.getElementById('list');
   search     = document.getElementById('searchInput');
 
+  // Статистика
+  statSubmittedEl = document.getElementById('statSubmitted');
+  statProcessedEl = document.getElementById('statProcessed');
+  statPendingEl   = document.getElementById('statPending');
+
+  // Просмотр формы
   sheet      = document.getElementById('sheet');
   frame      = document.getElementById('formFrame');
   loader     = document.getElementById('loader');
@@ -232,24 +270,40 @@ function init() {
   document.addEventListener('touchstart', blurIfOutsideField, { passive: true, capture: true });
   document.addEventListener('mousedown',  blurIfOutsideField, true);
 
-  // Telegram WebApp: готовность UI
-  tg.ready?.();
-  
-  // --- Всегда открывать на весь экран ---
-  tg.expand?.();                 // сразу разворачиваем
-  tg.disableVerticalSwipes?.();  // блокируем полулист свайпом (если поддерживается)
+  // Рассчитываем высоты для "липких" поиска и статистики
+  const headerEl  = document.querySelector('.app-header');
+  const toolbarEl = document.querySelector('.toolbar');
+  const setHeights = () => {
+    const hh = (headerEl?.offsetHeight  || 56);
+    const th = (toolbarEl?.offsetHeight || 56);
+    document.documentElement.style.setProperty('--header-h',  hh + 'px');
+    document.documentElement.style.setProperty('--toolbar-h', th + 'px');
+  };
+  setHeights();
+  if (window.ResizeObserver) {
+    const ro = new ResizeObserver(setHeights);
+    headerEl  && ro.observe(headerEl);
+    toolbarEl && ro.observe(toolbarEl);
+  }
+  window.addEventListener('resize', setHeights);
 
-  // Если вдруг сжалось — разворачиваем снова
-  tg.onEvent?.('viewportChanged', () => {
+  // Telegram WebApp: готовность и авто-разворачивание на весь экран
+  tg.ready?.();
+  tg.setHeaderColor?.('bg_color');       // шапка Telegram сливается с фоном
+  tg.expand?.();                          // сразу на весь экран
+  tg.disableVerticalSwipes?.();           // убираем "полулист", где поддерживается
+  tg.onEvent?.('viewportChanged', () => { // страховка + обновляем высоты
     if (!tg.isExpanded) tg.expand?.();
+    setHeights();
   });
 
-  // Стартовая загрузка данных
+  // Стартовая загрузка
   loadForms();
+  loadStats?.(); // если функция добавлена — подтянет цифры; иначе просто пропустится
 }
 
-
 window.addEventListener('DOMContentLoaded', init);
+
 
 
 
