@@ -15,6 +15,22 @@
     <!-- второго столбца может не быть — сетка на 1fr auto ок -->
   </section>
 
+   <!-- Статистика  -->
+  <section id="stats" class="stats" aria-live="polite">
+    <div class="stat-card">
+      <div class="stat-number" id="statSubmitted">0</div>
+      <div class="stat-label">Подано</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number" id="statProcessed">0</div>
+      <div class="stat-label">Отвечено</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number" id="statPending">0</div>
+      <div class="stat-label">В ожидании</div>
+    </div>
+  </section>
+
   <!-- Список форм -->
   <main id="list" class="cards" aria-live="polite"></main>
 
@@ -36,6 +52,7 @@
   <script src="./app.js?v=2"></script>
 </body>
 </html>
+
 
 
 
