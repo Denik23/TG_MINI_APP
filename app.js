@@ -14,7 +14,8 @@ const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp 
 };
 
 /* ---------- Константы ---------- */
-const API_URL = 'https://script.google.com/macros/s/AKfycbxYLWsMRGFerrJZQy-oI_QbfFDwgcyyxHfNFaCVQH2CQ0g6v_nPOCuUe-IuFsYg9ZGQ/exec';
+const API_URL   = 'https://script.google.com/macros/s/AKfycbxYLWsMRGFerrJZQy-oI_QbfFDwgcyyxHfNFaCVQH2CQ0g6v_nPOCuUe-IuFsYg9ZGQ/exec';
+const STATS_URL = 'https://script.google.com/macros/s/AKfycbyCC9XbzQmJZmm6kslaeOQ8vGwikDkl4fiv-SNAnAyCtITkfMaj1CFF45gXctK7lcMRAg/exec';
 
 /* ---------- Состояние ---------- */
 let forms = [];
@@ -87,6 +88,10 @@ async function loadForms(maxRetries = 3) {
 /* ---------- Глобальные ссылки на элементы (заполняются в init) ---------- */
 let appLoader, list, search, sheet, frame, loader, sheetTitle, backBtn;
 
+/* ---------- Статистика (элементы и данные) ---------- */
+let statSubmittedEl, statProcessedEl, statPendingEl;
+let stats = { submitted: 0, processed: 0 };
+
 /* ---------- Рендер списка (только просмотр) ---------- */
 function render() {
   if (!list) return;
@@ -133,12 +138,12 @@ function render() {
   });
 }
 
+/* ---------- Загрузка и рендер статистики ---------- */
 async function loadStats(maxRetries = 2) {
-  // Пытаемся получить stats; при ошибке оставим нули
   let attempt = 0, lastErr = null;
   while (attempt < maxRetries) {
     try {
-      const res  = await fetchWithTimeout(`${API_URL}?action=stats`, 10000);
+      const res  = await fetchWithTimeout(`${STATS_URL}?action=stats`, 10000);
       const text = await res.text();
       const json = JSON.parse(text);
       if (!json.ok) throw new Error(json.error || 'stats error');
@@ -290,20 +295,16 @@ function init() {
   // Telegram WebApp: готовность и авто-разворачивание на весь экран
   tg.ready?.();
   tg.setHeaderColor?.('bg_color');       // шапка Telegram сливается с фоном
-  tg.expand?.();                          // сразу на весь экран
-  tg.disableVerticalSwipes?.();           // убираем "полулист", где поддерживается
-  tg.onEvent?.('viewportChanged', () => { // страховка + обновляем высоты
+  tg.expand?.();                         // сразу на весь экран
+  tg.disableVerticalSwipes?.();          // убираем "полулист", где поддерживается
+  tg.onEvent?.('viewportChanged', () => {
     if (!tg.isExpanded) tg.expand?.();
     setHeights();
   });
 
   // Стартовая загрузка
   loadForms();
-  loadStats?.(); // если функция добавлена — подтянет цифры; иначе просто пропустится
+  loadStats?.(); // если STATS_URL корректный и на бэке есть action=stats — подтянет цифры
 }
 
 window.addEventListener('DOMContentLoaded', init);
-
-
-
-
