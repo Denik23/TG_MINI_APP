@@ -234,10 +234,7 @@ function init() {
 
   // Telegram WebApp: готовность UI
   tg.ready?.();
-  tg.setHeaderColor?.('bg_color');
-  tg.onEvent?.('themeChanged', () => {
-  tg.setHeaderColor?.('bg_color');
-});
+  
   // --- Всегда открывать на весь экран ---
   tg.expand?.();                 // сразу разворачиваем
   tg.disableVerticalSwipes?.();  // блокируем полулист свайпом (если поддерживается)
@@ -253,5 +250,6 @@ function init() {
 
 
 window.addEventListener('DOMContentLoaded', init);
+
 
 
