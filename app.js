@@ -1,4 +1,4 @@
-/* ===================== Mini App: Zubr Forms (read-only + iframe) ===================== */
+/* ===================== Mini App: Zubr Forms (read-only + iframe, robust UID) ===================== */
 
 /* --- Безопасный доступ к Telegram.WebApp (стаб вне Телеграма) --- */
 const tg = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : {
@@ -21,11 +21,6 @@ let forms = [];
 let isLoading = false;
 
 /* ---------- Утилиты ---------- */
-const getUserId = () =>
-  String(tg.initDataUnsafe?.user?.id || new URLSearchParams(location.search).get('tgid') || '');
-
-const sleep = (ms) => new Promise(res => setTimeout(res, ms));
-
 function applyTheme(scheme) {
   document.documentElement.setAttribute(
     'data-theme',
@@ -33,7 +28,43 @@ function applyTheme(scheme) {
   );
 }
 
-/* ---------- API (c таймаутом и ретраями) ---------- */
+const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+
+/* БЕРЁМ UID из Telegram → query → localStorage (fallback генерируем) */
+function getQueryUid() {
+  const p = new URLSearchParams(location.search);
+  return p.get('tgid') || p.get('uid') || p.get('user_id') || p.get('id') || p.get('u') || '';
+}
+
+function makeDevUid() {
+  try {
+    const a = (self.crypto || window.crypto)?.getRandomValues?.(new Uint32Array(2));
+    if (a && a.length === 2) {
+      return 'dev_' + a[0].toString(16) + a[1].toString(16);
+    }
+  } catch {}
+  return 'dev_' + Math.floor(Math.random()*1e9).toString(16) + Date.now().toString(16);
+}
+
+function getUserId() {
+  const fromTG = tg?.initDataUnsafe?.user?.id;
+  const fromQuery = getQueryUid();
+  let id = String(fromTG || fromQuery || '');
+  if (!id) {
+    try {
+      id = localStorage.getItem('zubr_dev_uid') || '';
+      if (!id) {
+        id = makeDevUid();
+        localStorage.setItem('zubr_dev_uid', id);
+      }
+    } catch {
+      id = makeDevUid();
+    }
+  }
+  return id;
+}
+
+/* ---------- API (с таймаутом и ретраями) ---------- */
 async function fetchWithTimeout(url, ms = 10000) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), ms);
@@ -133,18 +164,23 @@ function render() {
 
 /* ---------- Открытие формы (в iframe) ---------- */
 function openForm(form) {
-  const uid = getUserId();
-  if (!uid) return tg.showAlert?.('Не удалось получить Telegram ID. Откройте мини-апп из Telegram или добавьте ?tgid=ID для теста.');
+  const uid = getUserId(); // всегда не пустой (TG/URL/dev)
   if (!form.baseUrl) return tg.showAlert?.('Ссылка не указана.');
 
   let url = form.baseUrl;
 
-  // Google Forms
+  // Google Forms: ожидается baseUrl, заканчивающийся "=" (hidden поле)
   if (url.includes('docs.google.com/forms')) {
-    if (!url.endsWith('=')) return tg.showAlert?.('baseUrl для формы должен заканчиваться "=".');
-    url = `${url}${encodeURIComponent(uid)}&embedded=true`;
+    if (!url.endsWith('=')) {
+      // не блокируем — просто добавим разделитель, чтобы не ломать UX
+      url = url + (url.includes('?') ? '&' : '?');
+    } else {
+      url = `${url}${encodeURIComponent(uid)}`;
+    }
+    // встраивание
+    url = url + (url.includes('?') ? '&' : '?') + 'embedded=true';
   }
-  // Google Slides (просмотр)
+  // Google Slides: принудительное embed
   else if (url.includes('docs.google.com/presentation')) {
     if (url.includes('/pub?')) url = url.replace('/pub?', '/embed?');
     if (!url.includes('/embed?')) url = url.replace(/\/d\/e\/[^/]+/, "$&/embed");
