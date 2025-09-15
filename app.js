@@ -186,10 +186,12 @@ function openForm(form) {
   let url = form.baseUrl;
 
   // Google Forms
-  if (url.includes("docs.google.com/forms")) {
-    if (!url.endsWith('=')) return tg.showAlert?.('baseUrl для формы должен заканчиваться "=".');
-    url = `${url}${encodeURIComponent(uid)}&embedded=true`;
-  }
+  // Если хотим открывать свою кастомную форму вместо Google Forms
+if (url.includes("docs.google.com/forms")) {
+  // Вместо встраивания гугл-формы — указываем путь к своей странице
+  url = `./custom-form.html?uid=${encodeURIComponent(uid)}&id=${encodeURIComponent(form.id)}`;
+}
+
   // Google Slides
   else if (url.includes("docs.google.com/presentation")) {
     if (url.includes("/pub?")) url = url.replace("/pub?", "/embed?");
@@ -326,3 +328,4 @@ function init() {
 }
 
 window.addEventListener('DOMContentLoaded', init);
+
